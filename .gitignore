@@ -1,1 +1,7 @@
 venv
+hash-config.json
+keycloak-users.json
+user_creation.log
+dev-users.json
+.env
+.DS_Store
