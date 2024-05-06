@@ -2,6 +2,8 @@ venv
 hash-config.json
 keycloak-users.json
 user_creation.log
-dev-users.json
+*users.json
 .env
 .DS_Store
+failed_ids_thread_*
+thread_*
