@@ -6,4 +6,5 @@ user_creation.log
 .env
 .DS_Store
 failed_ids_thread_*
+processed_ids_thread_*
 thread_*

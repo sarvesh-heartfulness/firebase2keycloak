@@ -12,9 +12,39 @@ dotenv.load_dotenv()
 # Global variables
 KEYCLOAK_URL = os.getenv('KEYCLOAK_URL')
 REALM_NAME = os.getenv('REALM_NAME')
-ADMIN_TOKEN = os.getenv('ADMIN_TOKEN')
 NUM_THREADS = int(os.getenv('NUM_THREADS', '1'))  # Default to 1 thread if not provided
 NUM_USERS_TO_PROCESS = int(os.getenv('NUM_USERS_TO_PROCESS', '100'))  # Default to process 100 users if not provided
+
+def get_admin_token():
+    '''
+    Get KeyCloak Admin Token
+    '''
+    keycloak_url = os.getenv('KEYCLOAK_URL')
+    realm_name = os.getenv('REALM_NAME')
+    client_id = os.getenv('CLIENT_ID')
+    client_secret = os.getenv('CLIENT_SECRET')
+
+    token_url = f'{keycloak_url}/realms/{realm_name}/protocol/openid-connect/token'
+    payload = {
+        'grant_type': 'client_credentials',
+        'client_id': client_id,
+        'client_secret': client_secret
+    }
+    
+    try:
+        response = requests.post(token_url, data=payload)
+        if response.status_code == 200:
+            token_data = response.json()
+            return token_data.get('access_token')
+        else:
+            print(f"Failed to obtain admin token: {response.text}")
+            return None
+    except Exception as e:
+        print(f"Error obtaining admin token: {e}")
+        return None
+
+# Obtain the admin token
+ADMIN_TOKEN = get_admin_token()
 
 # Lock for file writing
 file_lock = threading.Lock()
@@ -27,7 +57,7 @@ class UserProcessor(threading.Thread):
         self.logger = self.setup_logger()
 
     def setup_logger(self):
-        log_file = f'thread_{self.thread_num}_log.txt'
+        log_file = os.getenv('LOG_FILE_PATH', f'thread_') + f'{self.thread_num}_log.txt'
         logger = logging.getLogger(f'Thread-{self.thread_num}')
         logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -40,8 +70,8 @@ class UserProcessor(threading.Thread):
         url = f'{KEYCLOAK_URL}/admin/realms/{REALM_NAME}/users'
         headers = {'Authorization': f'Bearer {ADMIN_TOKEN}', 'Content-Type': 'application/json'}
 
-        processed_ids_file = f'processed_ids_thread_{self.thread_num}.json'
-        failed_ids_file = f'failed_ids_thread_{self.thread_num}.json'
+        processed_ids_file = os.getenv('PROCESSED_IDS_FILE_PATH', f'processed_ids_thread_') + f'{self.thread_num}.json'
+        failed_ids_file = os.getenv('FAILED_IDS_FILE_PATH', f'failed_ids_thread_') + f'{self.thread_num}.json'
 
         processed_ids = self.load_ids(processed_ids_file)
         failed_ids = self.load_ids(failed_ids_file)
@@ -255,7 +285,7 @@ class UserProcessor(threading.Thread):
                         }
                         url = f'{KEYCLOAK_URL}/admin/realms/{REALM_NAME}/users/{user_id}/federated-identity/{identityProvider}'
                         response = requests.post(url, headers=headers, data=json.dumps(social_data))
-                        if response.status_code == 200:
+                        if response.status_code == 204:
                             self.logger.info(f'Added Google provider to user - ID: {user_id} and Provider ID: {provider["rawId"]}')
                         else:
                             self.logger.error(f'Error adding Google provider to user: {response.text}')
@@ -303,7 +333,8 @@ def load_users(file_path, num_users_to_process):
         return None
 
 def main():
-    users_data = load_users('qa-users.json', NUM_USERS_TO_PROCESS)
+    user_dump = os.getenv('USER_DUMP_FILE')
+    users_data = load_users(user_dump, NUM_USERS_TO_PROCESS)
     if users_data:
         threads = []
         chunk_size = len(users_data) // NUM_THREADS
