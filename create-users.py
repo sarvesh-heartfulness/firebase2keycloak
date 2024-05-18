@@ -49,6 +49,7 @@ timestamp = str(int(time.time()))
 
 class UserProcessor(threading.Thread):
     def __init__(self, thread_num, users_data):
+        # Initialize thread attributes
         super().__init__()
         self.thread_num = thread_num
         self.users_data = users_data
@@ -56,6 +57,9 @@ class UserProcessor(threading.Thread):
         self.logger = self.setup_logger()
 
     def setup_logger(self):
+        '''
+        This will setup logger to store log files in a sub folder along with timestamp
+        '''
         os.makedirs(self.log_folder, exist_ok=True)
         log_file = os.path.join(self.log_folder, f'thread_{self.thread_num}_log.txt')
         logger = logging.getLogger(f'Thread-{self.thread_num}')
@@ -67,9 +71,11 @@ class UserProcessor(threading.Thread):
         return logger
 
     def run(self):
+        # Set KeyCloak users URL and authentication headers 
         url = f'{KEYCLOAK_URL}/admin/realms/{REALM_NAME}/users'
         headers = {'Authorization': f'Bearer {ADMIN_TOKEN}', 'Content-Type': 'application/json'}
 
+        # Store execution data for overall report
         processed_ids_file = f'{self.log_folder}/processed_ids_thread_{self.thread_num}.json'
         failed_ids_file = f'{self.log_folder}/failed_ids_thread_{self.thread_num}.json'
         skipped_ids_file = f'{self.log_folder}/skipped_ids_thread_{self.thread_num}.json'
@@ -80,6 +86,7 @@ class UserProcessor(threading.Thread):
         skipped_ids = self.load_json(skipped_ids_file)
         failed_records = self.load_json(failed_records_file)
 
+        # Process records for a thread
         for i, user in enumerate(self.users_data):
             print(f'Processing record... - userId: {user["localId"]} (Thread {self.thread_num}) (Index {i})')
             self.logger.info('|------------------------------------------------------------------------|')
@@ -94,12 +101,12 @@ class UserProcessor(threading.Thread):
                     success = self.process_phone_number_user(user, url, headers, processed_ids, failed_ids, failed_records)
 
                 elif 'email' in user and 'passwordHash' in user:
-                    # Process email users
+                    # Process email users (records with passwordHash)
                     self.logger.info('Processing email user...')
                     success = self.process_email_user(user, url, headers, processed_ids, failed_ids, failed_records)
 
                 elif 'providerUserInfo' in user and len(user['providerUserInfo']) > 0:
-                    # Process users with provider information
+                    # Process users with provider information (Social Login)
                     providerAvailable = False
                     for provider in user['providerUserInfo']:
                         if provider['providerId'] == 'google.com':
@@ -134,6 +141,9 @@ class UserProcessor(threading.Thread):
             self.logger.info('\n')
 
     def load_json(self, file_path):
+        '''
+        Helper function to load json file
+        '''
         try:
             with open(file_path) as f:
                 return json.load(f)
@@ -144,6 +154,9 @@ class UserProcessor(threading.Thread):
             return []
 
     def write_to_file(self, data, file_path):
+        '''
+        Helper function to write to a file
+        '''
         try:
             with open(file_path, 'w') as f:
                 json.dump(list(data), f, indent=4)
@@ -151,6 +164,9 @@ class UserProcessor(threading.Thread):
             logging.error(f'Error writing data to file {file_path}: {e}')
 
     def process_phone_number_user(self, user, url, headers, processed_ids, failed_ids, failed_records):
+        '''
+        Helper function to process phone user
+        '''
         local_id = user['localId']
         display_name = user.get('displayName', '').split(' ')
         first_name = display_name[0] if display_name else None
@@ -186,13 +202,14 @@ class UserProcessor(threading.Thread):
             return False
 
     def process_email_user(self, user, url, headers, processed_ids, failed_ids, failed_records):
+        '''
+        Helper function to process email user
+        '''
         local_id = user['localId']
         display_name = user.get('displayName', '').split(' ')
         first_name = display_name[0] if display_name else None
         last_name = display_name[1] if len(display_name) > 1 else None
         photo_url = user.get('photoUrl', '')
-
-        # TODO: Validate email address
 
         user_data = {
             'username': user['email'],
@@ -232,6 +249,9 @@ class UserProcessor(threading.Thread):
             return False
 
     def process_provider_user(self, user, url, headers, processed_ids, failed_ids, failed_records):
+        '''
+        Helper function to process provicer user i.e. user with Social Login
+        '''
         local_id = user['localId']
         display_name = user.get('displayName', '').split(' ')
         first_name = display_name[0] if display_name else None
@@ -292,17 +312,6 @@ class UserProcessor(threading.Thread):
             self.logger.error(f'Error creating user: {e}')
             return None
 
-    def find_user(self, url, headers, username):
-        try:
-            response = requests.get(url, headers=headers, params={'username': username})
-            if response.status_code == 200 and len(response.json()) > 0:
-                return response.json()[0]['id']
-            else:
-                return None
-        except Exception as e:
-            self.logger.error(f'Error finding user: {e}')
-            return None
-
 def load_users(file_path, num_users_to_process):
     try:
         with open(file_path) as f:
@@ -313,19 +322,23 @@ def load_users(file_path, num_users_to_process):
         return None
 
 def main():
+    # Script execution starts here
     start_time = time.time() # Record the start time
     user_dump = os.getenv('USER_DUMP_FILE')
     users_data = load_users(user_dump, NUM_USERS_TO_PROCESS)
     if users_data:
         threads = []
         chunk_size = len(users_data) // NUM_THREADS
+        # Divide user data in chunks for specified number of threads
         user_chunks = [users_data[i:i + chunk_size] for i in range(0, len(users_data), chunk_size)]
 
+        # Start threads for processing user data
         for i in range(NUM_THREADS):
             thread = UserProcessor(i + 1, user_chunks[i])
             threads.append(thread)
             thread.start()
 
+        # This waits until all threads are completed
         for thread in threads:
             thread.join()
     else:
