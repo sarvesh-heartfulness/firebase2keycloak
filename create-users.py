@@ -1,9 +1,4 @@
-import dotenv
-import json
-import os
-import requests
-import logging
-import threading
+import dotenv, json, logging, os, requests, threading, time
 from datetime import datetime
 
 # Load environment variables
@@ -49,15 +44,24 @@ ADMIN_TOKEN = get_admin_token()
 # Lock for file writing
 file_lock = threading.Lock()
 
+# Timestamp for log folder
+timestamp = str(int(time.time()))
+
 class UserProcessor(threading.Thread):
     def __init__(self, thread_num, users_data):
+        # Initialize thread attributes
         super().__init__()
         self.thread_num = thread_num
         self.users_data = users_data
+        self.log_folder = os.getenv('LOG_FILE_PATH', 'Log') + f'logs_{timestamp}'
         self.logger = self.setup_logger()
 
     def setup_logger(self):
-        log_file = os.getenv('LOG_FILE_PATH', f'thread_') + f'{self.thread_num}_log.txt'
+        '''
+        This will setup logger to store log files in a sub folder along with timestamp
+        '''
+        os.makedirs(self.log_folder, exist_ok=True)
+        log_file = os.path.join(self.log_folder, f'thread_{self.thread_num}_log.txt')
         logger = logging.getLogger(f'Thread-{self.thread_num}')
         logger.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -67,52 +71,66 @@ class UserProcessor(threading.Thread):
         return logger
 
     def run(self):
+        # Set KeyCloak users URL and authentication headers 
         url = f'{KEYCLOAK_URL}/admin/realms/{REALM_NAME}/users'
         headers = {'Authorization': f'Bearer {ADMIN_TOKEN}', 'Content-Type': 'application/json'}
 
-        processed_ids_file = os.getenv('PROCESSED_IDS_FILE_PATH', f'processed_ids_thread_') + f'{self.thread_num}.json'
-        failed_ids_file = os.getenv('FAILED_IDS_FILE_PATH', f'failed_ids_thread_') + f'{self.thread_num}.json'
+        # Store execution data for overall report
+        processed_ids_file = f'{self.log_folder}/processed_ids_thread_{self.thread_num}.json'
+        failed_ids_file = f'{self.log_folder}/failed_ids_thread_{self.thread_num}.json'
+        skipped_ids_file = f'{self.log_folder}/skipped_ids_thread_{self.thread_num}.json'
+        failed_records_file = f'{self.log_folder}/failed_records_thread_{self.thread_num}.json'
 
-        processed_ids = self.load_ids(processed_ids_file)
-        failed_ids = self.load_ids(failed_ids_file)
+        processed_ids = self.load_json(processed_ids_file)
+        failed_ids = self.load_json(failed_ids_file)
+        skipped_ids = self.load_json(skipped_ids_file)
+        failed_records = self.load_json(failed_records_file)
 
+        # Process records for a thread
         for i, user in enumerate(self.users_data):
-            print(f'Processing record... - userId: {user["localId"]}')
+            print(f'Processing record... - userId: {user["localId"]} (Thread {self.thread_num}) (Index {i})')
             self.logger.info('|------------------------------------------------------------------------|')
-            self.logger.info(f'Processing record... - userId: {user["localId"]} (Thread {self.thread_num})')
+            self.logger.info(f'Processing record... - userId: {user["localId"]} (Thread {self.thread_num}) (Index {i})')
 
             try:
                 success = False
+                # Note: Duplicate phone user is not handled unless it used as username
                 if 'phoneNumber' in user and 'passwordHash' not in user:
                     # Process phone number users
                     self.logger.info('Processing phone number user...')
-                    success = self.process_phone_number_user(user, url, headers, processed_ids, failed_ids)
+                    success = self.process_phone_number_user(user, url, headers, processed_ids, failed_ids, failed_records)
 
                 elif 'email' in user and 'passwordHash' in user:
-                    # Process email users
+                    # Process email users (records with passwordHash)
                     self.logger.info('Processing email user...')
-                    success = self.process_email_user(user, url, headers, processed_ids, failed_ids)
+                    success = self.process_email_user(user, url, headers, processed_ids, failed_ids, failed_records)
 
                 elif 'providerUserInfo' in user and len(user['providerUserInfo']) > 0:
-                    # Process users with provider information
-                    self.logger.info('Processing provider user...')
-                    success = self.process_provider_user(user, url, headers, processed_ids, failed_ids)
-
+                    # Process users with provider information (Social Login)
+                    providerAvailable = False
+                    for provider in user['providerUserInfo']:
+                        if provider['providerId'] == 'google.com':
+                            providerAvailable = True
+                            self.logger.info('Processing user with Google provider...')
+                            success = self.process_provider_user(user, url, headers, processed_ids, failed_ids, failed_records)
+                    if not providerAvailable:
+                        self.logger.error(f'Skipping the provider user without Google Login with data - {user}')
+                        skipped_ids.append(user['localId'])
                 else:
-                    if user['localId'] in failed_ids:
-                        self.logger.warning(f'Skipping failed user with localId: {user["localId"]}')
-                    else:
-                        self.logger.error('Invalid user data.')
-                        self.logger.error(user)
-                        failed_ids.append(user['localId'])
+                    self.logger.error(f'Skipping the user with invalid user data. {user}')
+                    skipped_ids.append(user['localId'])
 
-                # Update processed/failed IDs file after each record
+                # Update processed/failed/skipped IDs file after each record
                 if success:
                     with file_lock:
-                        self.write_ids_to_file(processed_ids, processed_ids_file)
+                        self.write_to_file(processed_ids, processed_ids_file)
                 else:
                     with file_lock:
-                        self.write_ids_to_file(failed_ids, failed_ids_file)
+                        if user['localId'] not in skipped_ids:
+                            self.write_to_file(failed_ids, failed_ids_file)
+                            self.write_to_file(failed_records, failed_records_file)
+                        else:
+                            self.write_to_file(skipped_ids, skipped_ids_file)
 
             except Exception as e:
                 self.logger.error(f'Error processing user: {e}')
@@ -122,7 +140,10 @@ class UserProcessor(threading.Thread):
             self.logger.info('|------------------------------------------------------------------------|')
             self.logger.info('\n')
 
-    def load_ids(self, file_path):
+    def load_json(self, file_path):
+        '''
+        Helper function to load json file
+        '''
         try:
             with open(file_path) as f:
                 return json.load(f)
@@ -132,23 +153,21 @@ class UserProcessor(threading.Thread):
             logging.error(f'Error loading IDs from file {file_path}: {e}')
             return []
 
-    def write_ids_to_file(self, ids, file_path):
+    def write_to_file(self, data, file_path):
+        '''
+        Helper function to write to a file
+        '''
         try:
             with open(file_path, 'w') as f:
-                json.dump(list(ids), f, indent=4)
+                json.dump(list(data), f, indent=4)
         except Exception as e:
-            logging.error(f'Error writing IDs to file {file_path}: {e}')
+            logging.error(f'Error writing data to file {file_path}: {e}')
 
-    def process_phone_number_user(self, user, url, headers, processed_ids, failed_ids):
+    def process_phone_number_user(self, user, url, headers, processed_ids, failed_ids, failed_records):
+        '''
+        Helper function to process phone user
+        '''
         local_id = user['localId']
-        if local_id in processed_ids:
-            self.logger.info(f'Skipping already processed user with localId: {local_id}')
-            return True
-
-        if local_id in failed_ids:
-            self.logger.warning(f'Skipping failed user with localId: {local_id}')
-            return False
-
         display_name = user.get('displayName', '').split(' ')
         first_name = display_name[0] if display_name else None
         last_name = display_name[1] if len(display_name) > 1 else None
@@ -168,7 +187,7 @@ class UserProcessor(threading.Thread):
         }
         if photo_url:
             user_data['attributes']['photoUrl'] = photo_url
-        self.logger.info(f'Creating user with phone number: {user_data}')
+        self.logger.info(f'Creating user with phone number')
         response = self.create_user(url, headers, user_data)
         if response and response.status_code == 201:
             self.logger.info('User created successfully with phone number.')
@@ -178,18 +197,15 @@ class UserProcessor(threading.Thread):
             error_message = f'Error creating phone number user: {response.text}'
             self.logger.error(error_message)
             failed_ids.append(local_id)
+            user['error'] = error_message
+            failed_records.append(user)
             return False
 
-    def process_email_user(self, user, url, headers, processed_ids, failed_ids):
+    def process_email_user(self, user, url, headers, processed_ids, failed_ids, failed_records):
+        '''
+        Helper function to process email user
+        '''
         local_id = user['localId']
-        if local_id in processed_ids:
-            self.logger.info(f'Skipping already processed user with localId: {local_id}')
-            return True
-
-        if local_id in failed_ids:
-            self.logger.warning(f'Skipping failed user with localId: {local_id}')
-            return False
-
         display_name = user.get('displayName', '').split(' ')
         first_name = display_name[0] if display_name else None
         last_name = display_name[1] if len(display_name) > 1 else None
@@ -222,32 +238,21 @@ class UserProcessor(threading.Thread):
         response = self.create_user(url, headers, user_data)
         if response and response.status_code == 201:
             self.logger.info('User created successfully with email.')
-            self.logger.info('Adding password to user...')
-            user_id = self.find_user(url, headers, user['email'])
-            if user_id:
-                self.logger.info(f'User found in Keycloak. - ID: {user_id}')
-                processed_ids.append(local_id)
-                return True
-            else:
-                self.logger.warning('User not found in Keycloak.')
-                failed_ids.append(local_id)
-                return False
+            processed_ids.append(local_id)
+            return True
         else:
             error_message = f'Error creating email user: {response.text}'
             self.logger.error(error_message)
             failed_ids.append(local_id)
+            user['error'] = error_message
+            failed_records.append(user)
             return False
 
-    def process_provider_user(self, user, url, headers, processed_ids, failed_ids):
+    def process_provider_user(self, user, url, headers, processed_ids, failed_ids, failed_records):
+        '''
+        Helper function to process provicer user i.e. user with Social Login
+        '''
         local_id = user['localId']
-        if local_id in processed_ids:
-            self.logger.info(f'Skipping already processed user with localId: {local_id}')
-            return True
-
-        if local_id in failed_ids:
-            self.logger.warning(f'Skipping failed user with localId: {local_id}')
-            return False
-
         display_name = user.get('displayName', '').split(' ')
         first_name = display_name[0] if display_name else None
         last_name = display_name[1] if len(display_name) > 1 else None
@@ -270,38 +275,33 @@ class UserProcessor(threading.Thread):
         response = self.create_user(url, headers, user_data)
         if response and response.status_code == 201:
             self.logger.info('User created successfully.')
-            user_id = self.find_user(url, headers, user.get('email', user['localId']))
-            if user_id:
-                self.logger.info('Searching for user in Keycloak...')
-                for provider in user['providerUserInfo']:
-                    if provider['providerId'] == 'google.com':
-                        self.logger.info('Adding Google provider to user.')
-                        # Add Google provider to user
-                        identityProvider = 'google'
-                        social_data = {
-                            'identityProvider': identityProvider,
-                            'userId': provider['rawId'],
-                            'userName': provider['email'] if 'email' in provider else provider['displayName'],
-                        }
-                        url = f'{KEYCLOAK_URL}/admin/realms/{REALM_NAME}/users/{user_id}/federated-identity/{identityProvider}'
-                        response = requests.post(url, headers=headers, data=json.dumps(social_data))
-                        if response.status_code == 204:
-                            self.logger.info(f'Added Google provider to user - ID: {user_id} and Provider ID: {provider["rawId"]}')
-                        else:
-                            self.logger.error(f'Error adding Google provider to user: {response.text}')
-                    elif provider['providerId'] == 'facebook.com':
-                        self.logger.info('Skip adding Facebook provider to user.')
-                        # Add Facebook provider to user
-                processed_ids.append(local_id)
-                return True
-            else:
-                self.logger.warning('User not found in Keycloak.')
-                failed_ids.append(local_id)
-                return False
+            # Get user id from response header `Location``
+            location_header = response.headers.get('Location')
+            user_id = location_header.split('/')[-1]
+            for provider in user['providerUserInfo']:
+                if provider['providerId'] == 'google.com':
+                    self.logger.info('Adding Google provider to user.')
+                    # Add Google provider to user
+                    identityProvider = 'google'
+                    social_data = {
+                        'identityProvider': identityProvider,
+                        'userId': provider['rawId'],
+                        'userName': provider['email'] if 'email' in provider else provider['displayName'],
+                    }
+                    url = f'{KEYCLOAK_URL}/admin/realms/{REALM_NAME}/users/{user_id}/federated-identity/{identityProvider}'
+                    response = requests.post(url, headers=headers, data=json.dumps(social_data))
+                    if response.status_code == 204:
+                        self.logger.info(f'Added Google provider to user - ID: {user_id} and Provider ID: {provider["rawId"]}')
+                    else:
+                        self.logger.error(f'Error adding Google provider to user: {response.text}')
+            processed_ids.append(local_id)
+            return True
         else:
             error_message = f'Error creating provider user: {response.text}'
             self.logger.error(error_message)
             failed_ids.append(local_id)
+            user['error'] = error_message
+            failed_records.append(user)
             return False
 
     def create_user(self, url, headers, user_data):
@@ -310,17 +310,6 @@ class UserProcessor(threading.Thread):
             return response
         except Exception as e:
             self.logger.error(f'Error creating user: {e}')
-            return None
-
-    def find_user(self, url, headers, username):
-        try:
-            response = requests.get(url, headers=headers, params={'username': username})
-            if response.status_code == 200 and len(response.json()) > 0:
-                return response.json()[0]['id']
-            else:
-                return None
-        except Exception as e:
-            self.logger.error(f'Error finding user: {e}')
             return None
 
 def load_users(file_path, num_users_to_process):
@@ -333,22 +322,31 @@ def load_users(file_path, num_users_to_process):
         return None
 
 def main():
+    # Script execution starts here
+    start_time = time.time() # Record the start time
     user_dump = os.getenv('USER_DUMP_FILE')
     users_data = load_users(user_dump, NUM_USERS_TO_PROCESS)
     if users_data:
         threads = []
         chunk_size = len(users_data) // NUM_THREADS
+        # Divide user data in chunks for specified number of threads
         user_chunks = [users_data[i:i + chunk_size] for i in range(0, len(users_data), chunk_size)]
 
+        # Start threads for processing user data
         for i in range(NUM_THREADS):
             thread = UserProcessor(i + 1, user_chunks[i])
             threads.append(thread)
             thread.start()
 
+        # This waits until all threads are completed
         for thread in threads:
             thread.join()
     else:
         logging.warning('No users data found.')
+
+    end_time = time.time() # Record the end time
+    total_time = end_time - start_time
+    print(f"Total time taken: {total_time} seconds")
 
 if __name__ == "__main__":
     main()
