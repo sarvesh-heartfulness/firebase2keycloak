@@ -35,7 +35,7 @@ def process_records(input_file):
     invalid_records = []
 
     for i, record in enumerate(records):
-        print(f'Validating record no. {i+1} with id {record['localId']}')
+        print(f'Validating record no. {i+1} with id {record["localId"]}')
         email = record.get('email', '')
         phone = record.get('phoneNumber', '')
 
@@ -45,18 +45,13 @@ def process_records(input_file):
         if ('phoneNumber' in record and 'passwordHash' not in record) or \
            ('email' in record and 'passwordHash' in record) or \
            ('providerUserInfo' in record and len(record['providerUserInfo']) > 0):
-
-           if any(provider.get('providerId', '').lower() == 'facebook.com' for provider in record.get('providerUserInfo', [])):
-                pass    
-           elif email_valid or 'email' not in record:  # If email is present, it should be valid
-                if phone_valid or 'phoneNumber' not in record:  # If phoneNumber is present, it should be valid
-                    valid_records.append(record)
-                    continue
+               if email_valid or 'email' not in record:  # If email is present, it should be valid
+                   if phone_valid or 'phoneNumber' not in record:  # If phoneNumber is present, it should be valid
+                       valid_records.append(record)
+                       continue
         
         # If any of the conditions are not met
         reasons = {}
-        if any(provider.get('providerId', '').lower() == 'facebook.com' for provider in record.get('providerUserInfo', [])):
-            reasons['facebookProvider'] = "User with Facebook Provider"
         if 'email' in record and not email_valid:
             reasons['invalidEmail'] = "User with invalid email"
         if 'email' in record and 'passwordHash' not in record and 'phoneNumber' not in record:

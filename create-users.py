@@ -39,7 +39,8 @@ def get_admin_token():
         return None
 
 # Obtain the admin token
-ADMIN_TOKEN = get_admin_token()
+# ADMIN_TOKEN = get_admin_token()
+ADMIN_TOKEN = os.getenv('ADMIN_TOKEN')
 
 # Lock for file writing
 file_lock = threading.Lock()
@@ -109,9 +110,10 @@ class UserProcessor(threading.Thread):
                     # Process users with provider information (Social Login)
                     providerAvailable = False
                     for provider in user['providerUserInfo']:
-                        if provider['providerId'] == 'google.com':
+                        # Records with 'facebookProvider' will be processed without adding facebook provider
+                        if provider['providerId'] in ['google.com', 'facebook.com']:
                             providerAvailable = True
-                            self.logger.info('Processing user with Google provider...')
+                            self.logger.info('Processing user with Google/Facebook provider...')
                             success = self.process_provider_user(user, url, headers, processed_ids, failed_ids, failed_records)
                     if not providerAvailable:
                         self.logger.error(f'Skipping the provider user without Google Login with data - {user}')
@@ -120,25 +122,23 @@ class UserProcessor(threading.Thread):
                     self.logger.error(f'Skipping the user with invalid user data. {user}')
                     skipped_ids.append(user['localId'])
 
-                # Update processed/failed/skipped IDs file after each record
-                if success:
-                    with file_lock:
-                        self.write_to_file(processed_ids, processed_ids_file)
-                else:
-                    with file_lock:
-                        if user['localId'] not in skipped_ids:
-                            self.write_to_file(failed_ids, failed_ids_file)
-                            self.write_to_file(failed_records, failed_records_file)
-                        else:
-                            self.write_to_file(skipped_ids, skipped_ids_file)
-
             except Exception as e:
                 self.logger.error(f'Error processing user: {e}')
                 self.logger.info('|------------------------------------------------------------------------|')
                 self.logger.info('\n')
+                failed_ids.append(user["localId"])
+                user['error'] = str(e)
+                failed_records.append(user)
                 continue
             self.logger.info('|------------------------------------------------------------------------|')
             self.logger.info('\n')
+
+        # Update processed/failed/skipped IDs file
+        with file_lock:
+            self.write_to_file(processed_ids, processed_ids_file)
+            self.write_to_file(failed_ids, failed_ids_file)
+            self.write_to_file(failed_records, failed_records_file)
+            self.write_to_file(skipped_ids, skipped_ids_file)
 
     def load_json(self, file_path):
         '''
