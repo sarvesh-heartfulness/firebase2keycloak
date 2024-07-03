@@ -78,11 +78,13 @@ class UserProcessor(threading.Thread):
 
         # Store execution data for overall report
         processed_ids_file = f'{self.log_folder}/processed_ids_thread_{self.thread_num}.json'
+        unprocessed_ids_file = f'{self.log_folder}/unprocessed_ids_thread_{self.thread_num}.json'
         failed_ids_file = f'{self.log_folder}/failed_ids_thread_{self.thread_num}.json'
         skipped_ids_file = f'{self.log_folder}/skipped_ids_thread_{self.thread_num}.json'
         failed_records_file = f'{self.log_folder}/failed_records_thread_{self.thread_num}.json'
 
         processed_ids = self.load_json(processed_ids_file)
+        unprocessed_ids = self.load_json(unprocessed_ids_file)
         failed_ids = self.load_json(failed_ids_file)
         skipped_ids = self.load_json(skipped_ids_file)
         failed_records = self.load_json(failed_records_file)
@@ -126,9 +128,7 @@ class UserProcessor(threading.Thread):
                 self.logger.error(f'Error processing user: {e}')
                 self.logger.info('|------------------------------------------------------------------------|')
                 self.logger.info('\n')
-                failed_ids.append(user["localId"])
-                user['error'] = str(e)
-                failed_records.append(user)
+                unprocessed_ids.append(user["localId"])
                 continue
             self.logger.info('|------------------------------------------------------------------------|')
             self.logger.info('\n')
@@ -136,6 +136,7 @@ class UserProcessor(threading.Thread):
         # Update processed/failed/skipped IDs file
         with file_lock:
             self.write_to_file(processed_ids, processed_ids_file)
+            self.write_to_file(unprocessed_ids, unprocessed_ids_file)
             self.write_to_file(failed_ids, failed_ids_file)
             self.write_to_file(failed_records, failed_records_file)
             self.write_to_file(skipped_ids, skipped_ids_file)
@@ -316,7 +317,9 @@ def load_users(file_path, num_users_to_process):
     try:
         with open(file_path) as f:
             users_data = json.load(f)
-            return users_data[:num_users_to_process]
+            if num_users_to_process:
+                return users_data[:num_users_to_process]
+            return users_data
     except Exception as e:
         logging.error(f'Error loading users: {e}')
         return None
