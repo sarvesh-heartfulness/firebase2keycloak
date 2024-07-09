@@ -105,7 +105,7 @@ class UserProcessor(threading.Thread):
 
                 elif 'email' in user and 'passwordHash' in user:
                     # Process email users (records with passwordHash)
-                    self.logger.info('Processing email user...')
+                    self.logger.info('Processing email-password user...')
                     success = self.process_email_user(user, url, headers, processed_ids, failed_ids, failed_records)
 
                 elif 'providerUserInfo' in user and len(user['providerUserInfo']) > 0:
@@ -120,6 +120,10 @@ class UserProcessor(threading.Thread):
                     if not providerAvailable:
                         self.logger.error(f'Skipping the provider user without Google Login with data - {user}')
                         skipped_ids.append(user['localId'])
+                elif 'email' in user and user['emailVerified']:
+                    # Process email users with verified id
+                    self.logger.info('Processing verified email user...')
+                    success = self.process_email_user(user, url, headers, processed_ids, failed_ids, failed_records)
                 else:
                     self.logger.error(f'Skipping the user with invalid user data. {user}')
                     skipped_ids.append(user['localId'])
@@ -216,23 +220,27 @@ class UserProcessor(threading.Thread):
             'username': user['email'],
             'email': user['email'],
             'emailVerified': user['emailVerified'],
-            'enabled': not user.get('disabled', False),
+            'enabled': True,
             'firstName': first_name,
             'lastName': last_name,
             'attributes': {
                 'phoneNumber': user.get('phoneNumber'),
                 'phoneNumberVerified': user.get('phoneNumberVerified', False),
                 'userId': local_id,
-            },
-            "credentials": [{
+            }
+        }
+
+        if 'passwordHash' in user:
+            user_data['credentials'] = [{
                 "hashedSaltedValue": user['passwordHash'],
                 "salt": user['salt'],
                 "hashIterations": -1,
                 "algorithm": "firebase-scrypt",
                 "temporary": False,
                 "type": "password"
-            }]
-        }
+                }]
+            user_data['enabled'] = not user.get('disabled', False)
+        
         if photo_url:
             user_data['attributes']['photoUrl'] = photo_url
 
