@@ -173,7 +173,7 @@ class UserProcessor(threading.Thread):
         Helper function to process phone user
         '''
         local_id = user['localId']
-        display_name = user.get('displayName', '').split(' ')
+        display_name = self.get_display_name(user)
         first_name = display_name[0] if display_name else None
         last_name = display_name[1] if len(display_name) > 1 else None
         photo_url = user.get('photoUrl', '')
@@ -211,7 +211,7 @@ class UserProcessor(threading.Thread):
         Helper function to process email user
         '''
         local_id = user['localId']
-        display_name = user.get('displayName', '').split(' ')
+        display_name = self.get_display_name(user)
         first_name = display_name[0] if display_name else None
         last_name = display_name[1] if len(display_name) > 1 else None
         photo_url = user.get('photoUrl', '')
@@ -262,7 +262,7 @@ class UserProcessor(threading.Thread):
         Helper function to process provicer user i.e. user with Social Login
         '''
         local_id = user['localId']
-        display_name = user.get('displayName', '').split(' ')
+        display_name = self.get_display_name(user)
         first_name = display_name[0] if display_name else None
         last_name = display_name[1] if len(display_name) > 1 else None
 
@@ -320,6 +320,22 @@ class UserProcessor(threading.Thread):
         except Exception as e:
             self.logger.error(f'Error creating user: {e}')
             return None
+    
+    def get_display_name(self, user):
+        '''
+        Helper function to get display name from user data.
+        Falls back to email or phone number if display name is not available.
+        '''
+        if user.get('displayName'):
+            return user['displayName'].split(' ')
+        elif user.get('email'):
+            email_name = user['email'].split('@')[0]
+            return email_name.split('.')
+        elif user.get('phoneNumber'):
+            phone_name = user['phoneNumber'].replace('+', '').replace(' ', '')
+            return [phone_name]
+        else:
+            return []
 
 def load_users(file_path, num_users_to_process):
     try:
