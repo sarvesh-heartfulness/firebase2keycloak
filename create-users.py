@@ -1,4 +1,4 @@
-import dotenv, json, logging, os, requests, threading, time
+import dotenv, json, logging, os, requests, threading, time, uuid
 from datetime import datetime
 
 # Load environment variables
@@ -178,7 +178,7 @@ class UserProcessor(threading.Thread):
         last_name = display_name[1] if len(display_name) > 1 else None
         photo_url = user.get('photoUrl', '')
         user_data = {
-            'username': user['phoneNumber'],
+            'username': str(uuid.uuid4()),
             'firstName': first_name,
             'lastName': last_name,
             'email': user.get('email', ''),
@@ -217,7 +217,7 @@ class UserProcessor(threading.Thread):
         photo_url = user.get('photoUrl', '')
 
         user_data = {
-            'username': user['email'],
+            'username': str(uuid.uuid4()),
             'email': user['email'],
             'emailVerified': user['emailVerified'],
             'enabled': True,
@@ -267,7 +267,7 @@ class UserProcessor(threading.Thread):
         last_name = display_name[1] if len(display_name) > 1 else None
 
         user_data = {
-            'username': user.get('email', user['localId']),
+            'username': str(uuid.uuid4()),
             'email': user.get('email'),
             'emailVerified': user.get('emailVerified', False),
             'firstName': first_name,
@@ -340,7 +340,8 @@ class UserProcessor(threading.Thread):
 def load_users(file_path, num_users_to_process):
     try:
         with open(file_path) as f:
-            users_data = json.load(f)
+            data = json.load(f)
+            users_data = data['users'] if isinstance(data, dict) and 'users' in data else data
             if num_users_to_process:
                 return users_data[:num_users_to_process]
             return users_data

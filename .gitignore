@@ -8,6 +8,7 @@ user_creation.log
 failed_ids_thread_*
 failed_records_thread_*
 processed_ids_thread_*
+unprocessed_ids_thread_*
 skipped_ids_thread_*
 thread_*
 LOG

@@ -1,39 +1,54 @@
-# firebase2keycloak
-Script to migrate Firebase users to KeyCloak
+# Prerequisites
 
-## Execution
-### Get Firebase user dump
-- Firebase CLI - https://firebase.google.com/docs/cli/
-- Get User dump using Firebase CLI - https://firebase.google.com/docs/cli/auth#auth-export
-### Clone the repository
+- A server with Docker and Git installed.
+- Firebase user dump and admin credentials of a Keycloak instance.
+
+## 1. Setup Environment
+
+Clone the repository:
 ```sh
-git clone https://github.com/sarvesh-heartfulness/firebase2keycloak.git
+git clone git@github.com:HeartfulnessInstitute/firebase2keycloak.git
 ```
-### Add credentials to .env
-- Change directory to cloned repository
+
+## 2. Environment Preparation
+
+### Create .env file
+
+In the project directory (firebase2keycloak), create a file named `.env` to store environment variables used by the script.
+
+Example `.env`:
+```
+KEYCLOAK_URL=https://auth.keycloakhost.com
+REALM_NAME=rxxxx
+NUM_THREADS=20
+NUM_USERS_TO_PROCESS=20000
+LOG_FILE_PATH=/app/data/
+USER_DUMP_FILE=/app/data/users.json
+ADMIN_TOKEN=eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJrM05JU3ZKVWdsUy05THNtVDh3WDhpTzlBXzJlQ3hkcmF1TmdMWFB5a05vIn0.eyJleHAiOjE3MTc0ODY5ODIsImlhdCIxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+
+### Put User Dump in Proper Location
+
+1. Place your Firebase user data in a JSON file named `users.json`.
+2. Move this file to the `LOG` directory within the project directory (create the `LOG` directory if it doesn't exist).
+
+## 3. Build and Run the Script
+
+### Build Docker Image
+
+Navigate to the project directory (firebase2keycloak) and run the following command to build the Docker image:
+
 ```sh
-cd firebase2keycloak
-touch .env
+sudo docker build -t fb2kk .
 ```
-- Sample .env
-```txt
-KEYCLOAK_URL=https://keycloak-xxx.com
-REALM_NAME=realm-name
-CLIENT_ID=client-name
-CLIENT_SECRET=xxxxxxxxxxxxxxxxx
-NUM_THREADS=5
-NUM_USERS_TO_PROCESS=100
-LOG_FILE_PATH=thread_
-PROCESSED_IDS_FILE_PATH=processed_ids_thread_
-FAILED_IDS_FILE_PATH=failed_ids_thread_
-USER_DUMP_FILE=users.json
-```
-### Build a docker image
+
+### Run the Script
+
+Run the script to migrate users:
+
 ```sh
-docker build -t fb2kk .
+sudo docker run -v /home/ec2-user/firebase2keycloak/LOG/:/app/data --env-file .env fb2kk python create-users.py
 ```
-### Execute the Script
-```sh
-docker run -v /path/to/dump/:/app/data --env-file .env fb2kk python create-users.py
-```
-_Assuming absolute path of the user dump is `/path/to/dump/users.json`_
+> 
+This command mounts the `LOG` directory on the host machine to the `/app/data` directory within the container. It also uses the `.env` file for environment variables.
