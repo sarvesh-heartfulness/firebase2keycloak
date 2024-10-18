@@ -115,9 +115,10 @@ class UserProcessor(threading.Thread):
                         # Records with 'facebookProvider' will be processed without adding facebook provider
                         if provider['providerId'] in ['google.com', 'facebook.com']:
                             providerAvailable = True
-                            self.logger.info('Processing user with Google/Facebook provider...')
-                            success = self.process_provider_user(user, url, headers, processed_ids, failed_ids, failed_records)
-                    if not providerAvailable:
+                    if providerAvailable:
+                        self.logger.info('Processing user with Google/Facebook provider...')
+                        success = self.process_provider_user(user, url, headers, processed_ids, failed_ids, failed_records)
+                    else:
                         self.logger.error(f'Skipping the provider user without Google Login with data - {user}')
                         skipped_ids.append(user['localId'])
                 elif 'email' in user and user['emailVerified']:
