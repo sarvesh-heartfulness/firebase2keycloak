@@ -1,6 +1,8 @@
 import dotenv, json, logging, os, requests, threading, time, uuid
 from datetime import datetime
 
+import re
+
 # Load environment variables
 dotenv.load_dotenv()
 
@@ -121,9 +123,9 @@ class UserProcessor(threading.Thread):
                     else:
                         self.logger.error(f'Skipping the provider user without Google Login with data - {user}')
                         skipped_ids.append(user['localId'])
-                elif 'email' in user and user['emailVerified']:
-                    # Process email users with verified id
-                    self.logger.info('Processing verified email user...')
+                elif 'email' in user:
+                    # Process email users
+                    self.logger.info('Processing email user...')
                     success = self.process_email_user(user, url, headers, processed_ids, failed_ids, failed_records)
                 else:
                     self.logger.error(f'Skipping the user with invalid user data. {user}')
@@ -328,7 +330,10 @@ class UserProcessor(threading.Thread):
         Falls back to email or phone number if display name is not available.
         '''
         if user.get('displayName'):
-            return user['displayName'].split(' ')
+            unicode_text = user['displayName']
+            safe_text = re.sub(r'\\u[0-9A-Fa-f]{0,3}(?![0-9A-Fa-f])', '', unicode_text)
+            converted_text = bytes(safe_text, 'utf-8').decode('unicode-escape')
+            return converted_text.split(' ')
         elif user.get('email'):
             email_name = user['email'].split('@')[0]
             return email_name.split('.')
